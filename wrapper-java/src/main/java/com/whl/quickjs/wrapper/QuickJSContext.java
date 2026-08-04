@@ -289,7 +289,7 @@ public class QuickJSContext implements Closeable {
         this.leakDetectionListener = leakDetectionListener;
     }
 
-    public void destroy() {
+    public synchronized void destroy() {
         checkSameThread();
         checkDestroyed();
 
@@ -298,6 +298,17 @@ public class QuickJSContext implements Closeable {
         objectRecords.clear();
         destroyContext(context);
         destroyed = true;
+    }
+
+    /**
+     * Requests the current runtime to interrupt JavaScript execution.
+     * This method may be called from any thread and never destroys the context.
+     */
+    public synchronized void requestInterrupt() {
+        if (destroyed) {
+            return;
+        }
+        requestInterruptNative(runtime);
     }
 
     public void releaseObjectRecords() {
@@ -598,6 +609,7 @@ public class QuickJSContext implements Closeable {
     private native void dumpObjects(long runtime, String fileName);
     private native long getMemoryUsedSize(long runtime);
     private native void setGCThreshold(long runtime, int size);
+    private native void requestInterruptNative(long runtime);
 
     // context
     private native long createContext(long runtime);
