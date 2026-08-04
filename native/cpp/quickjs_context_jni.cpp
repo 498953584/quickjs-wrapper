@@ -78,7 +78,8 @@ Java_com_whl_quickjs_wrapper_QuickJSContext_get(JNIEnv *env, jobject thiz, jlong
 }extern "C"
 JNIEXPORT jlong JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_createContext(JNIEnv *env, jobject thiz, jlong runtime) {
-    auto *wrapper = new(std::nothrow) QuickJSWrapper(env, thiz, reinterpret_cast<JSRuntime *>(runtime));
+    auto *state = reinterpret_cast<QuickJSRuntimeState *>(runtime);
+    auto *wrapper = new(std::nothrow) QuickJSWrapper(env, thiz, state);
     if (!wrapper || !wrapper->context || !wrapper->runtime) {
         delete wrapper;
         wrapper = nullptr;
@@ -175,14 +176,14 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_setMaxStackSize(JNIEnv *env, jclass thiz,
                                                             jlong runtime, jint size) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     JS_SetMaxStackSize(rt, size);
 }
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_isLiveObject(JNIEnv *env, jclass thiz, jlong runtime,
                                                          jlong value) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     JSValue jsObj = JS_MKPTR(JS_TAG_OBJECT, reinterpret_cast<void *>(value));
     if (JS_IsLiveObject(rt, jsObj)) {
         return JNI_TRUE;
@@ -193,27 +194,47 @@ Java_com_whl_quickjs_wrapper_QuickJSContext_isLiveObject(JNIEnv *env, jclass thi
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_runGC(JNIEnv *env, jclass thiz, jlong runtime) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     JS_RunGC(rt);
 }
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_whl_quickjs_wrapper_QuickJSContext_createRuntime(JNIEnv *env, jclass clazz) {
-    auto *rt = JS_NewRuntime();
-    return reinterpret_cast<jlong>(rt);
+Java_com_whl_quickjs_wrapper_QuickJSContext_createRuntime(JNIEnv *, jclass) {
+    auto *state = new(std::nothrow) QuickJSRuntimeState();
+    if (state == nullptr) {
+        return 0;
+    }
+
+    state->runtime = JS_NewRuntime();
+    if (state->runtime == nullptr) {
+        delete state;
+        return 0;
+    }
+
+    JS_SetInterruptHandler(state->runtime, quickjsInterruptHandler, state);
+    return reinterpret_cast<jlong>(state);
+}
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_whl_quickjs_wrapper_QuickJSContext_requestInterruptNative(
+        JNIEnv *, jobject, jlong runtime) {
+    auto *state = reinterpret_cast<QuickJSRuntimeState *>(runtime);
+    if (state != nullptr) {
+        state->interrupt_requested.store(true, std::memory_order_release);
+    }
 }
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_setMemoryLimit(JNIEnv *env, jclass clazz, jlong runtime,
                                                            jint size) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     JS_SetMemoryLimit(rt, size);
 }
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_dumpMemoryUsage(JNIEnv *env, jclass clazz,
                                                             jlong runtime, jstring file_name) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
 
     if (file_name == nullptr) {
         JSMemoryUsage stats;
@@ -239,7 +260,7 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_dumpObjects(JNIEnv *env, jobject thiz, jlong runtime,
                                                         jstring file_name) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
 
     if (file_name == nullptr) {
         JS_DumpObjects(rt);
@@ -275,7 +296,7 @@ extern "C"
 JNIEXPORT jlong JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_getMemoryUsedSize(JNIEnv *env, jobject thiz,
                                                               jlong runtime) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     JSMemoryUsage usage;
     JS_ComputeMemoryUsage(rt, &usage);
     return (jlong)usage.memory_used_size;
@@ -284,7 +305,7 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_whl_quickjs_wrapper_QuickJSContext_setGCThreshold(JNIEnv *env, jobject thiz, jlong runtime,
                                                            jint size) {
-    auto *rt = reinterpret_cast<JSRuntime*>(runtime);
+    auto *rt = reinterpret_cast<QuickJSRuntimeState *>(runtime)->runtime;
     // use -1 to disable automatic GC
     if (size < 0) {
         size = -1;

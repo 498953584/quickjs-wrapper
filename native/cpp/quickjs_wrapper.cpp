@@ -10,6 +10,14 @@
 #define MAX_SAFE_INTEGER (((int64_t)1 << 53) - 1)
 
 // util
+int quickjsInterruptHandler(JSRuntime *, void *opaque) {
+    auto *state = static_cast<QuickJSRuntimeState *>(opaque);
+    if (state == nullptr) {
+        return 0;
+    }
+    return state->interrupt_requested.exchange(false, std::memory_order_acq_rel) ? 1 : 0;
+}
+
 static string getJavaName(JNIEnv* env, jobject javaClass) {
     auto classType = env->GetObjectClass(javaClass);
     const auto method = env->GetMethodID(classType, "getName", "()Ljava/lang/String;");
@@ -314,9 +322,10 @@ static void promiseRejectionTracker(JSContext *ctx, JSValueConst promise,
     }
 }
 
-QuickJSWrapper::QuickJSWrapper(JNIEnv *env, jobject thiz, JSRuntime *rt) {
+QuickJSWrapper::QuickJSWrapper(JNIEnv *env, jobject thiz, QuickJSRuntimeState *state) {
     jniEnv = env;
-    runtime = rt;
+    runtime_state = state;
+    runtime = state->runtime;
     jniThiz = jniEnv->NewGlobalRef(thiz);
 
     // init ES6Module
@@ -373,9 +382,11 @@ QuickJSWrapper::QuickJSWrapper(JNIEnv *env, jobject thiz, JSRuntime *rt) {
 }
 
 QuickJSWrapper::~QuickJSWrapper() {
+    JS_SetInterruptHandler(runtime, nullptr, nullptr);
     JS_FreeValue(context, ownPropertyNames);
     JS_FreeContext(context);
     JS_FreeRuntime(runtime);
+    delete runtime_state;
 
     jniEnv->DeleteGlobalRef(jniThiz);
     jniEnv->DeleteGlobalRef(objectClass);

@@ -6,6 +6,7 @@
 #define QUICKJS_TEST_CONTEXT_WRAPPER_H
 
 #include <iostream>
+#include <atomic>
 #include <set>
 #include <vector>
 #include <queue>
@@ -14,6 +15,13 @@ using namespace std;
 #include "../quickjs/quickjs.h"
 #include <jni.h>
 #include <map>
+
+struct QuickJSRuntimeState {
+    JSRuntime *runtime = nullptr;
+    std::atomic_bool interrupt_requested{false};
+};
+
+int quickjsInterruptHandler(JSRuntime *runtime, void *opaque);
 
 class QuickJSWrapper {
 private:
@@ -24,6 +32,7 @@ private:
 public:
     JNIEnv *jniEnv;
     jobject jniThiz;
+    QuickJSRuntimeState *runtime_state;
     JSRuntime *runtime;
     JSContext *context;
 
@@ -64,7 +73,7 @@ public:
     jmethodID newArrayM;
     jmethodID newFunctionM;
 
-    QuickJSWrapper(JNIEnv *env, jobject thiz, JSRuntime *rt);
+    QuickJSWrapper(JNIEnv *env, jobject thiz, QuickJSRuntimeState *state);
     ~QuickJSWrapper();
 
     jobject evaluate(JNIEnv*, jobject thiz, jstring script, jstring file_name);
