@@ -15,51 +15,17 @@ Experimental Features Stability not guaranteed.
 
 ## Download
 
-[![Maven Central](https://img.shields.io/maven-central/v/wang.harlon.quickjs/wrapper-android.svg?label=Maven%20Central&color=blue)](https://search.maven.org/search?q=g:%22wang.harlon.quickjs%22%20AND%20a:%22wrapper-android%22)
+JitPack is the only Maven publication source for this fork.
 
-```Groovy
+```groovy
 repositories {
-  mavenCentral()
+    maven { url 'https://jitpack.io' }
 }
 
 dependencies {
-  // Pick one:
-
-  // 1. Android - Use wrapper in your public API:
-  api 'wang.harlon.quickjs:wrapper-android:latest.version'
-
-  // 2. JVM - Use wrapper in your implementation only:
-  implementation 'wang.harlon.quickjs:wrapper-java:latest.version'
+    implementation 'com.github.498953584.quickjs-wrapper:wrapper-android:3.2.3-interrupt.1'
 }
 ```
-
-### SNAPSHOT 
-[![Wrapper](https://img.shields.io/static/v1?label=snapshot&message=wrapper&logo=apache%20maven&color=yellowgreen)](https://s01.oss.sonatype.org/content/repositories/snapshots/wang/harlon/quickjs/wrapper-android/) <br>
-
-<details>
- <summary>See how to import the snapshot</summary>
-
-#### Including the SNAPSHOT
-Snapshots of the current development version of Wrapper are available, which track [the latest versions](https://s01.oss.sonatype.org/content/repositories/snapshots/wang/harlon/quickjs/wrapper-android/).
-
-To import snapshot versions on your project, add the code snippet below on your gradle file:
-```Gradle
-repositories {
-   maven { url 'https://s01.oss.sonatype.org/content/repositories/snapshots/' }
-}
-```
-
-Next, add the dependency below to your **module**'s `build.gradle` file:
-```gradle
-dependencies {
-    // For Android
-    implementation "wang.harlon.quickjs:wrapper-android:latest-SNAPSHOT"
-    // For JVM
-    implementation "wang.harlon.quickjs:wrapper-java:latest-SNAPSHOT"
-}
-```
-
-</details>
 
 ## Building the Project
 This repository use git submodules and so when you are checking out the app, you'll need to ensure the submodules are initialized properly. You can use the `--recursive` flag when cloning the project to do this.
@@ -287,6 +253,8 @@ ProGuard users must manually add the options from [consumer-rules.pro](/wrapper-
 
 ## Concurrency
 JavaScript runtimes are single threaded. All execution in the JavaScript runtime is guaranteed thread safe, by way of Java synchronization.
+
+`requestInterrupt()` may be called from another thread. `destroy()`/`close()` must be called by the thread that created the context and should run in a `finally` block.
 
 ## Find this repository useful?
 Support it by joining __[stargazers](https://github.com/HarlonWang/quickjs-wrapper/stargazers)__ for this repository. <br>
