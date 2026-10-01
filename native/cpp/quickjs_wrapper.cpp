@@ -280,17 +280,33 @@ static bool throwIfUnhandledRejections(QuickJSWrapper *wrapper, JSContext *ctx) 
     return is_error;
 }
 
+static void discardJavaCallbackFailure(QuickJSWrapper *wrapper, JSContext *ctx) {
+    JSValue exception = JS_GetException(ctx);
+    JS_FreeValue(ctx, exception);
+    while (!wrapper->unhandledRejections.empty()) {
+        JSValueConst reason = wrapper->unhandledRejections.front();
+        JS_FreeValue(ctx, reason);
+        wrapper->unhandledRejections.pop();
+    }
+}
+
 static bool executePendingJobLoop(JNIEnv *env, JSRuntime *rt, JSContext *ctx) {
+    auto wrapper = reinterpret_cast<QuickJSWrapper *>(JS_GetRuntimeOpaque(rt));
     if (env->ExceptionCheck()) {
+        discardJavaCallbackFailure(wrapper, ctx);
         return false;
     }
 
-    JSContext *ctx1;
+    JSContext *ctx1 = ctx;
     bool success = true;
     int err;
     /* execute the pending jobs */
     for(;;) {
         err = JS_ExecutePendingJob(rt, &ctx1);
+        if (env->ExceptionCheck()) {
+            discardJavaCallbackFailure(wrapper, ctx1);
+            return false;
+        }
         if (err <= 0) {
             if (err < 0) {
                 success = false;
@@ -301,7 +317,7 @@ static bool executePendingJobLoop(JNIEnv *env, JSRuntime *rt, JSContext *ctx) {
         }
     }
 
-    if (success && throwIfUnhandledRejections(reinterpret_cast<QuickJSWrapper *>(JS_GetRuntimeOpaque(rt)), ctx)) {
+    if (success && throwIfUnhandledRejections(wrapper, ctx)) {
         success = false;
     }
 
@@ -406,6 +422,10 @@ QuickJSWrapper::~QuickJSWrapper() {
 }
 
 jobject QuickJSWrapper::toJavaObject(JNIEnv *env, jobject thiz, JSValueConst this_obj, JSValueConst value) const{
+    if (env->ExceptionCheck()) {
+        return nullptr;
+    }
+
     jobject result;
     switch (JS_VALUE_GET_NORM_TAG(value)) {
         case JS_TAG_EXCEPTION: {
@@ -458,6 +478,14 @@ jobject QuickJSWrapper::toJavaObject(JNIEnv *env, jobject thiz, JSValueConst thi
         case JS_TAG_OBJECT: {
             auto value_ptr = reinterpret_cast<jlong>(JS_VALUE_GET_PTR(value));
             jobject creatorObj = env->CallObjectMethod(thiz, creatorM);
+            if (creatorObj == nullptr) {
+                if (!env->ExceptionCheck()) {
+                    throwJavaException(env, "java/lang/IllegalStateException",
+                                       "QuickJS object creator is unavailable");
+                }
+                result = nullptr;
+                break;
+            }
             if (JS_IsFunction(context, value)) {
                 auto obj_ptr = reinterpret_cast<jlong>(JS_VALUE_GET_PTR(this_obj));
                 result = env->CallObjectMethod(creatorObj, newFunctionM, thiz, value_ptr, obj_ptr, JS_VALUE_GET_TAG(this_obj));
@@ -652,21 +680,41 @@ QuickJSWrapper::setProperty(JNIEnv *env, jobject thiz, jlong this_obj, jstring n
 
 JSValue QuickJSWrapper::jsFuncCall(int callback_id, JSValueConst this_val, int argc, JSValueConst *argv){
     if (jniEnv->ExceptionCheck()) {
-        return JS_EXCEPTION;
+        return JS_ThrowInternalError(context, "Java callback entered with a pending exception");
     }
 
     jobjectArray javaArgs = jniEnv->NewObjectArray((jsize)argc, objectClass, nullptr);
+    if (javaArgs == nullptr || jniEnv->ExceptionCheck()) {
+        return JS_ThrowOutOfMemory(context);
+    }
 
     for (int i = 0; i < argc; i++) {
         JSValue v = JS_DupValue(context, argv[i]);
         auto java_arg = toJavaObject(jniEnv, jniThiz, this_val, v);
+        if (jniEnv->ExceptionCheck()) {
+            if (java_arg != nullptr) {
+                jniEnv->DeleteLocalRef(java_arg);
+            }
+            jniEnv->DeleteLocalRef(javaArgs);
+            return JS_ThrowInternalError(context, "Java callback argument conversion failed");
+        }
         jniEnv->SetObjectArrayElement(javaArgs, (jsize)i, java_arg);
         jniEnv->DeleteLocalRef(java_arg);
+        if (jniEnv->ExceptionCheck()) {
+            jniEnv->DeleteLocalRef(javaArgs);
+            return JS_ThrowInternalError(context, "Java callback argument conversion failed");
+        }
     }
 
     auto result = jniEnv->CallObjectMethod(jniThiz, callFunctionBackM, callback_id, javaArgs);
 
     jniEnv->DeleteLocalRef(javaArgs);
+    if (jniEnv->ExceptionCheck()) {
+        if (result != nullptr) {
+            jniEnv->DeleteLocalRef(result);
+        }
+        return JS_ThrowInternalError(context, "Java callback threw an exception");
+    }
 
     JSValue jsValue = toJSValue(jniEnv, jniThiz, result);
 

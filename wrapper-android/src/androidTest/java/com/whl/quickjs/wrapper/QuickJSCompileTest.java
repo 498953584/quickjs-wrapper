@@ -50,6 +50,27 @@ public class QuickJSCompileTest {
         }
     }
 
+    @Test
+    public void promiseJavaCallbackExceptionEscapesExecuteWithoutAbortingProcess() {
+        try (QuickJSContext context = QuickJSContext.create()) {
+            context.getGlobalObject().setProperty("throwFromJava", args -> {
+                throw new IllegalStateException("java callback failed");
+            });
+            byte[] bytes = context.compile(
+                    "Promise.resolve().then(() => throwFromJava()); ({ ok: true });"
+            );
+
+            try {
+                context.execute(bytes);
+                fail("Expected the Java callback exception");
+            } catch (IllegalStateException expected) {
+                assertEquals("java callback failed", expected.getMessage());
+            }
+
+            assertEquals(2, context.evaluate("1 + 1"));
+        }
+    }
+
     @Test(expected = QuickJSException.class)
     public void testThrowErrorWithFileName() {
         try (QuickJSContext context = QuickJSContext.create()) {
